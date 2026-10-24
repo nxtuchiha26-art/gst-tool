@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Upload a purchase register and GSTR-2B and get a mismatch report with the input tax credit at risk.">
+<title>GST Mismatch Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one narrow column, upload card on top, a ledger of result rows that doubles as the tab bar, one table below. */
+  :root {
+    --bg: #F3F6F9;
+    --surface: #FFFFFF;
+    --ink: #13202B;
+    --muted: #566676;
+    --line: #DCE3EA;
+    --accent: #1B5E8C;
+    --accent-ink: #FFFFFF;
+    --good: #1E7B4F;
+    --warn: #A86B0B;
+    --bad: #B3322E;
+    --info: #5B6FA8;
+    --tint: #EAF1F7;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E151C; --surface: #16202A; --ink: #E5ECF3; --muted: #93A4B4; --line: #293746;
+      --accent: #5BAAE6; --accent-ink: #0B1822; --good: #4CC38A; --warn: #E3B04B; --bad: #F0706A;
+      --info: #8FA2DA; --tint: #1C2A37; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E151C; --surface: #16202A; --ink: #E5ECF3; --muted: #93A4B4; --line: #293746;
+    --accent: #5BAAE6; --accent-ink: #0B1822; --good: #4CC38A; --warn: #E3B04B; --bad: #F0706A;
+    --info: #8FA2DA; --tint: #1C2A37; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+    padding-block: 20px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 22px; line-height: 1.2; font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  p { margin: 0; }
+  .lede { color: var(--muted); margin-top: 6px; max-width: 60ch; }
+  header { display: flex; flex-direction: column; }
+
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+  .picks { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 560px) { .picks { grid-template-columns: 1fr 1fr; } }
+  .pick { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bg); cursor: pointer; min-width: 0; }
+  .pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .pick .label { font-weight: 500; }
+  .pick .hint { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .pick.has-file { border-style: solid; border-color: var(--accent); background: var(--tint); }
+  .pick.has-file .hint { color: var(--ink); font-family: var(--font-data); font-size: 12.5px; }
+
+  .tol { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+  .tol input { width: 76px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font-family: var(--font-data); font-size: 14px; }
+  .tol input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn { padding: 11px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-weight: 500; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .msg { font-size: 14px; padding: 10px 12px; border-radius: 8px; background: var(--tint); }
+  .msg.error { color: var(--bad); background: transparent; border: 1px solid var(--bad); }
+  .msg.warn { color: var(--warn); background: transparent; border: 1px solid var(--warn); }
+
+  .sample-tag { display: inline-flex; align-self: flex-start; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 2px 10px; }
+
+  .risk { display: flex; flex-direction: column; gap: 4px; }
+  .risk .amount { font-family: var(--font-data); font-weight: 500; font-size: 34px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .risk .amount.zero { color: var(--good); }
+  .risk .amount.some { color: var(--bad); }
+  .risk .why { color: var(--muted); font-size: 13.5px; max-width: 60ch; }
+
+  .ledger { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); text-align: left; min-width: 0; }
+  .row:last-child { border-bottom: 0; }
+  .row[aria-pressed="true"] { background: var(--tint); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .row .name { flex: 1; min-width: 0; }
+  .row .count { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { padding: 9px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); background: var(--tint); position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+  td.mono { font-family: var(--font-data); font-size: 12.5px; }
+  .empty { padding: 18px 14px; color: var(--muted); }
+  .table-title { display: flex; flex-direction: column; gap: 2px; }
+  .table-title p { color: var(--muted); font-size: 13.5px; max-width: 62ch; }
+
+  .foot { color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 6px; max-width: 66ch; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+  .back { font-size: 14px; color: var(--accent); text-decoration: none; margin-bottom: 10px; align-self: flex-start; }
+  .back:hover { text-decoration: underline; }
+  .back:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <a class="back" href="index.html">&larr; Home</a>
+    <h1>GST Mismatch Checker</h1>
+    <p class="lede">Compare your purchase register with GSTR-2B and see which invoices put your input tax credit at risk. Your files are read in this browser and are not uploaded anywhere.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="upload-h">
+    <h2 id="upload-h">Your files</h2>
+    <div class="picks">
+      <label class="pick" id="pick-books" for="file-books">
+        <span class="label">Purchase register</span>
+        <span class="hint" id="hint-books">Tap to choose .xlsx or .csv</span>
+        <input type="file" id="file-books" accept=".xlsx,.xls,.csv">
+      </label>
+      <label class="pick" id="pick-gst" for="file-gst">
+        <span class="label">GSTR-2B from the portal</span>
+        <span class="hint" id="hint-gst">Tap to choose .xlsx or .csv</span>
+        <input type="file" id="file-gst" accept=".xlsx,.xls,.csv">
+      </label>
+    </div>
+    <div class="tol">
+      <label for="tol">Treat tax differences up to ₹</label>
+      <input type="number" id="tol" value="1" min="0" max="100" step="0.5" inputmode="decimal">
+      <span>as a match (rounding).</span>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="run" disabled>Check mismatches</button>
+      <button class="btn" id="sample-btn">Use sample data</button>
+    </div>
+    <div class="msg error" id="error" role="alert" hidden></div>
+  </section>
+
+  <section class="panel" aria-labelledby="result-h" id="results">
+    <h2 id="result-h">Result</h2>
+    <span class="sample-tag" id="sample-tag">Sample data</span>
+
+    <div class="risk">
+      <span class="why">Input tax credit at risk</span>
+      <span class="amount" id="risk-amount">₹0</span>
+      <span class="why" id="risk-why"></span>
+    </div>
+
+    <div class="ledger" id="ledger"></div>
+
+    <div class="table-title">
+      <h2 id="table-h"></h2>
+      <p id="table-desc"></p>
+    </div>
+    <div class="scroll" id="table-wrap"></div>
+
+    <div class="msg warn" id="dups" hidden></div>
+
+    <div class="actions">
+      <button class="btn primary" id="download">Download Excel report</button>
+    </div>
+    <div class="msg" id="dl-msg" hidden></div>
+  </section>
+
+  <div class="foot">
+    <p>Invoices are matched on supplier GSTIN plus invoice number. Spacing, case and leading zeros are ignored, so inv-3 and INV/0003 count as the same invoice.</p>
+    <p>This tool flags differences for review. It is not tax advice, and a qualified CA should check the results before any claim or filing. If your GSTR-2B has several sheets, the sheet with the most recognisable columns is used.</p>
+  </div>
+</main>
+
+<script>
+/*CORE_START*/
+const ALIASES = {
+  gstin: ["gstin","gstin of supplier","supplier gstin","gstin uin","party gstin","gst no","gstin no","supplier gst no"],
+  invoice_no: ["invoice no","invoice number","inv no","inv number","bill no","bill number","document number","invoice"],
+  invoice_date: ["invoice date","inv date","bill date","document date","date"],
+  taxable_value: ["taxable value","taxable amount","taxable val","basic value","taxable"],
+  tax: ["tax amount","total tax","gst amount","total gst","tax","gst"],
+  igst: ["igst","integrated tax","integrated tax amount"],
+  cgst: ["cgst","central tax","central tax amount"],
+  sgst: ["sgst","state ut tax","state tax","sgst utgst"]
+};
+const REQUIRED = ["gstin","invoice_no","taxable_value"];
+const NICE = { gstin:"GSTIN", invoice_no:"Invoice No", taxable_value:"Taxable Value" };
+
+function cleanHeader(t){ return String(t == null ? "" : t).toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+const LOOKUP = {};
+for (const can of Object.keys(ALIASES)) for (const n of ALIASES[can]) LOOKUP[cleanHeader(n)] = can;
+
+function mapColumns(cols){
+  const map = {}, used = new Set();
+  cols.forEach((c,i) => {
+    const can = LOOKUP[cleanHeader(c)];
+    if (can && !used.has(can)) { map[i] = can; used.add(can); }
+  });
+  return map;
+}
+/* Finds the header. Handles titles above it and two-row headers (GSTR-2B puts "Invoice details" above "Invoice number"). */
+function findHeader(rows){
+  let best = { score: -1, headers: [], dataStart: 0 };
+  const lim = Math.min(15, rows.length);
+  for (let i = 0; i < lim; i++) {
+    const a = rows[i] || [];
+    const s1 = Object.keys(mapColumns(a)).length;
+    if (s1 > best.score) best = { score: s1, headers: a, dataStart: i + 1 };
+    if (i + 1 < rows.length) {
+      const nx = rows[i + 1] || [], n = Math.max(a.length, nx.length), m = [];
+      for (let c = 0; c < n; c++) {
+        const lo = nx[c];
+        m.push(lo != null && String(lo).trim() !== "" ? lo : a[c]);
+      }
+      const s2 = Object.keys(mapColumns(m)).length;
+      if (s2 > best.score) best = { score: s2, headers: m, dataStart: i + 2 };
+    }
+  }
+  return best;
+}
+const GSTIN_SHAPE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
+function num(v){
+  if (typeof v === "number") return isFinite(v) ? v : 0;
+  const n = parseFloat(String(v == null ? "" : v).replace(/,/g,""));
+  return isFinite(n) ? n : 0;
+}
+function pad2(n){ return String(n).padStart(2,"0"); }
+function fmtDate(v){
+  if (v == null || v === "") return "";
+  if (typeof v === "number" && v > 20000 && v < 80000) {
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return pad2(d.getUTCDate()) + "-" + pad2(d.getUTCMonth()+1) + "-" + d.getUTCFullYear();
+  }
+  return String(v).trim();
+}
+function normalizeInvoice(v){
+  return String(v == null ? "" : v).replace(/[^A-Za-z0-9]/g,"").toUpperCase().replace(/\d+/g, m => m.replace(/^0+(?=\d)/,""));
+}
+function r2(x){ return Math.round(x * 100) / 100; }
+
+function standardize(rows, label){
+  rows = rows.filter(r => r && r.some(v => v !== null && v !== undefined && String(v).trim() !== ""));
+  if (!rows.length) throw new Error("The " + label + " file looks empty.");
+  const hdr = findHeader(rows);
+  const map = mapColumns(hdr.headers);
+  const found = new Set(Object.values(map));
+  const missing = REQUIRED.filter(c => !found.has(c)).map(c => NICE[c]);
+  if (!found.has("tax") && !["igst","cgst","sgst"].some(c => found.has(c))) missing.push("Tax amount (or IGST / CGST / SGST)");
+  if (missing.length) {
+    const seen = hdr.headers.filter(x => x != null && String(x).trim() !== "").join(", ");
+    throw new Error("The " + label + " file is missing these columns: " + missing.join(", ") + ". Columns we could read: " + (seen || "none") + ".");
+  }
+  const out = [];
+  for (const r of rows.slice(hdr.dataStart)) {
+    const o = {};
+    for (const idx of Object.keys(map)) o[map[idx]] = r[idx];
+    const gstin = o.gstin == null ? "" : String(o.gstin).trim();
+    if (!gstin) continue;
+    const invoiceNo = o.invoice_no == null ? "" : String(o.invoice_no).trim();
+    /* Skip "Total" lines and notes: not a GSTIN shape and no invoice number. */
+    if (!invoiceNo && !GSTIN_SHAPE.test(gstin.toUpperCase().replace(/\s+/g, ""))) continue;
+    const tax = found.has("tax") ? num(o.tax) : num(o.igst) + num(o.cgst) + num(o.sgst);
+    out.push({
+      gstin,
+      invoice_no: invoiceNo,
+      invoice_date: fmtDate(o.invoice_date),
+      taxable_value: num(o.taxable_value),
+      tax
+    });
+  }
+  return out;
+}
+
+function prepare(list){
+  const m = new Map();
+  for (const r of list) {
+    const gstin = r.gstin.toUpperCase().replace(/\s+/g,"");
+    const key = gstin + "|" + normalizeInvoice(r.invoice_no);
+    const e = m.get(key);
+    if (e) { e.taxable_value += r.taxable_value; e.tax += r.tax; e.entries++; }
+    else m.set(key, { key, gstin, invoice_no: r.invoice_no, invoice_date: r.invoice_date, taxable_value: r.taxable_value, tax: r.tax, entries: 1 });
+  }
+  return m;
+}
+function byGstinInvoice(a, b){ return (a[0] + "|" + a[1]).localeCompare(b[0] + "|" + b[1], "en", { numeric: true }); }
+
+function reconcile(booksList, gstList, tol){
+  const b = prepare(booksList), g = prepare(gstList);
+  const matched = [], mismatch = [], onlyB = [], onlyG = [];
+  for (const [k, rb] of b) {
+    const rg = g.get(k);
+    if (!rg) { onlyB.push(rb); continue; }
+    const diff = r2(rb.tax - rg.tax);
+    (Math.abs(diff) <= tol ? matched : mismatch).push({ rb, rg, diff });
+  }
+  for (const [k, rg] of g) if (!b.has(k)) onlyG.push(rg);
+
+  const used = new Set(), possible = [], stillB = [];
+  for (const rb of onlyB) {
+    const cand = onlyG.find(rg => !used.has(rg) && rg.gstin === rb.gstin
+      && Math.abs(rg.tax - rb.tax) <= tol && Math.abs(rg.taxable_value - rb.taxable_value) <= tol);
+    if (cand) { used.add(cand); possible.push({ rb, rg: cand }); } else stillB.push(rb);
+  }
+  const stillG = onlyG.filter(x => !used.has(x));
+
+  const tables = {
+    amount_mismatch: {
+      headers: ["GSTIN","Invoice No","Tax (books)","Tax (GSTR-2B)","Difference (books - 2B)"], numeric: [2,3,4],
+      rows: mismatch.map(x => [x.rb.gstin, x.rb.invoice_no, x.rb.tax, x.rg.tax, x.diff]).sort(byGstinInvoice)
+    },
+    missing_in_2b: {
+      headers: ["GSTIN","Invoice No","Invoice Date","Taxable Value","Tax Amount"], numeric: [3,4],
+      rows: stillB.map(x => [x.gstin, x.invoice_no, x.invoice_date, x.taxable_value, x.tax]).sort(byGstinInvoice)
+    },
+    missing_in_books: {
+      headers: ["GSTIN","Invoice No","Invoice Date","Taxable Value","Tax Amount"], numeric: [3,4],
+      rows: stillG.map(x => [x.gstin, x.invoice_no, x.invoice_date, x.taxable_value, x.tax]).sort(byGstinInvoice)
+    },
+    possible_match: {
+      headers: ["GSTIN","Invoice No (books)","Invoice No (GSTR-2B)","Taxable Value","Tax Amount"], numeric: [3,4],
+      rows: possible.map(x => [x.rb.gstin, x.rb.invoice_no, x.rg.invoice_no, x.rb.taxable_value, x.rb.tax]).sort(byGstinInvoice)
+    },
+    matched: {
+      headers: ["GSTIN","Invoice No","Tax (books)","Tax (GSTR-2B)"], numeric: [2,3],
+      rows: matched.map(x => [x.rb.gstin, x.rb.invoice_no, x.rb.tax, x.rg.tax]).sort(byGstinInvoice)
+    }
+  };
+
+  const itcMissing = r2(stillB.reduce((s, x) => s + x.tax, 0));
+  const itcExcess = r2(mismatch.filter(x => x.diff > 0).reduce((s, x) => s + x.diff, 0));
+  const dupBooks = [...b.values()].filter(x => x.entries > 1).length;
+  const dupG = [...g.values()].filter(x => x.entries > 1).length;
+
+  const summary = [
+    ["Invoices in books", b.size],
+    ["Invoices in GSTR-2B", g.size],
+    ["Matched", matched.length],
+    ["Amount mismatch", mismatch.length],
+    ["Possible match (check invoice no.)", possible.length],
+    ["Missing in GSTR-2B", stillB.length],
+    ["Missing in books", stillG.length],
+    ["ITC at risk: invoices missing in GSTR-2B (Rs)", itcMissing],
+    ["ITC at risk: excess claimed on mismatches (Rs)", itcExcess],
+    ["Total ITC at risk (Rs)", r2(itcMissing + itcExcess)]
+  ];
+  return { tables, summary, itcMissing, itcExcess, itcTotal: r2(itcMissing + itcExcess), dupBooks, dupG };
+}
+
+/* Sample data: 40 invoices with problems planted on purpose. */
+function buildSample(){
+  let seed = 7;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const suppliers = ["27AAAPA1234A1Z5","29BBBPB2345B1Z6","07CCCPC3456C1Z7","33DDDPD4567D1Z8","24EEEPE5678E1Z9","19FFFPF6789F1Z1"];
+  const header = ["GSTIN of Supplier","Invoice No","Invoice Date","Taxable Value","IGST","CGST","SGST"];
+  const base = [];
+  for (let i = 1; i <= 40; i++) {
+    const taxable = (5 + Math.floor(rnd() * 196)) * 1000;
+    base.push({ g: suppliers[Math.floor(rnd() * suppliers.length)], no: "INV/" + String(i).padStart(4,"0"),
+      d: pad2(1 + Math.floor(rnd() * 28)) + "-09-2026", t: taxable, c: r2(taxable * 0.09) });
+  }
+  const toRow = x => [x.g, x.no, x.d, x.t, 0, x.c, x.c];
+  let books = base.map(x => ({ ...x }));
+  let gst = base.map(x => ({ ...x }));
+  gst = gst.filter(x => !["INV/0004","INV/0012","INV/0026"].includes(x.no));
+  books = books.filter(x => !["INV/0008","INV/0031"].includes(x.no));
+  for (const no of ["INV/0006","INV/0015","INV/0021"]) gst.find(x => x.no === no).c += 450;
+  gst.find(x => x.no === "INV/0010").no = "INV/9010";
+  gst.find(x => x.no === "INV/0020").no = "INVV0020";
+  gst.find(x => x.no === "INV/0003").no = "inv-3";
+  gst.find(x => x.no === "INV/0014").no = "INV 0014";
+  return { books: [header, ...books.map(toRow)], gst: [header, ...gst.map(toRow)] };
+}
+/*CORE_END*/
+
+/* ---------- Screen ---------- */
+const $ = id => document.getElementById(id);
+const rupee = n => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const state = { results: null, active: "amount_mismatch", sample: true, books: null, gst: null };
+
+const SECTIONS = [
+  { key: "amount_mismatch", name: "Amount mismatch", color: "--bad",
+    desc: "In both files, but the tax amounts differ. Ask the supplier which figure is right." },
+  { key: "missing_in_2b", name: "Missing in GSTR-2B", color: "--bad",
+    desc: "In your books but not on the portal. Credit on these invoices may not be claimable until the supplier files." },
+  { key: "missing_in_books", name: "Missing in books", color: "--warn",
+    desc: "On the portal but not in your books. You may have forgotten to record them, or they are not yours." },
+  { key: "possible_match", name: "Possible matches", color: "--info",
+    desc: "Same supplier and same amounts, but the invoice number is written differently. Confirm and fix the number." },
+  { key: "matched", name: "Matched", color: "--good",
+    desc: "Found in both files with the same tax amount." }
+];
+
+function showError(text){ const e = $("error"); e.textContent = text || ""; e.hidden = !text; }
+
+function renderTable(key){
+  const sec = SECTIONS.find(s => s.key === key);
+  const t = state.results.tables[key];
+  $("table-h").textContent = sec.name + " (" + t.rows.length + ")";
+  $("table-desc").textContent = sec.desc;
+  const wrap = $("table-wrap");
+  wrap.textContent = "";
+  if (!t.rows.length) {
+    const p = document.createElement("p"); p.className = "empty"; p.textContent = "Nothing here."; wrap.appendChild(p); return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead"), hr = document.createElement("tr");
+  t.headers.forEach((h, i) => { const th = document.createElement("th"); th.textContent = h; if (t.numeric.includes(i)) th.className = "num"; hr.appendChild(th); });
+  thead.appendChild(hr); table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const row of t.rows) {
+    const tr = document.createElement("tr");
+    row.forEach((v, i) => {
+      const td = document.createElement("td");
+      if (t.numeric.includes(i)) { td.className = "num"; td.textContent = Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+      else { if (i <= 1) td.className = "mono"; td.textContent = v; }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); wrap.appendChild(table);
+}
+
+function renderLedger(){
+  const box = $("ledger"); box.textContent = "";
+  for (const s of SECTIONS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "row"; b.setAttribute("aria-pressed", String(state.active === s.key));
+    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = "var(" + s.color + ")";
+    const name = document.createElement("span"); name.className = "name"; name.textContent = s.name;
+    const count = document.createElement("span"); count.className = "count"; count.textContent = state.results.tables[s.key].rows.length;
+    b.append(dot, name, count);
+    b.addEventListener("click", () => { state.active = s.key; renderLedger(); renderTable(s.key); });
+    box.appendChild(b);
+  }
+}
+
+function render(){
+  const r = state.results;
+  $("sample-tag").hidden = !state.sample;
+  const amt = $("risk-amount");
+  amt.textContent = rupee(r.itcTotal);
+  amt.className = "amount " + (r.itcTotal > 0 ? "some" : "zero");
+  $("risk-why").textContent = r.itcTotal > 0
+    ? rupee(r.itcMissing) + " on invoices missing in GSTR-2B, plus " + rupee(r.itcExcess) + " claimed in excess on mismatched invoices."
+    : "No invoices were found where your books claim more tax than GSTR-2B supports.";
+  const dups = $("dups");
+  const dupCount = r.dupBooks + r.dupG;
+  dups.hidden = dupCount === 0;
+  if (dupCount) dups.textContent = "Some invoices appear more than once in a file (" + r.dupBooks + " in books, " + r.dupG + " in GSTR-2B). Their amounts were added together. Check for duplicate entries.";
+  $("dl-msg").hidden = true;
+  renderLedger(); renderTable(state.active);
+}
+
+function runWith(booksRows, gstRows, isSample){
+  try {
+    showError("");
+    const tol = Math.max(0, num($("tol").value));
+    const books = standardize(booksRows, "purchase register");
+    const gst = standardize(gstRows, "GSTR-2B");
+    state.results = reconcile(books, gst, tol);
+    state.sample = isSample;
+    render();
+  } catch (e) {
+    showError(e.message || "Something went wrong reading the files.");
+  }
+}
+
+/* Read a workbook and pick the sheet whose header row has the most recognisable columns. */
+async function readFile(file){
+  if (typeof XLSX === "undefined") throw new Error("The spreadsheet reader did not load. Check your connection and reload the page.");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  let best = null, bestScore = -1;
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
+    const sc = rows.length ? findHeader(rows.filter(r => r && r.some(v => v != null && String(v).trim() !== ""))).score : -1;
+    if (sc > bestScore) { best = rows; bestScore = sc; }
+  }
+  return best || [];
+}
+
+function setFile(which, file){
+  state[which] = file;
+  const pick = $("pick-" + which), hint = $("hint-" + which);
+  pick.classList.toggle("has-file", !!file);
+  hint.textContent = file ? file.name : "Tap to choose .xlsx or .csv";
+  $("run").disabled = !(state.books && state.gst);
+}
+$("file-books").addEventListener("change", e => setFile("books", e.target.files[0] || null));
+$("file-gst").addEventListener("change", e => setFile("gst", e.target.files[0] || null));
+
+$("run").addEventListener("click", async () => {
+  const btn = $("run"); btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const [a, b] = await Promise.all([readFile(state.books), readFile(state.gst)]);
+    runWith(a, b, false);
+    $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) { showError(e.message || "Could not read the files."); }
+  btn.textContent = "Check mismatches"; btn.disabled = !(state.books && state.gst);
+});
+
+$("sample-btn").addEventListener("click", () => {
+  const s = buildSample(); runWith(s.books, s.gst, true);
+  $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+$("tol").addEventListener("change", () => {
+  /* Re-run when the tolerance changes and results came from the sample. Uploaded files re-run on the next click. */
+  if (state.sample) { const s = buildSample(); runWith(s.books, s.gst, true); }
+});
+
+$("download").addEventListener("click", () => {
+  const msg = $("dl-msg");
+  const say = t => { msg.textContent = t; msg.hidden = false; };
+  try {
+    if (typeof XLSX === "undefined") return say("The spreadsheet writer did not load. Check your connection, reload the page and try again.");
+    const r = state.results;
+    const wb = XLSX.utils.book_new();
+    const add = (name, headers, rows) => {
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      ws["!cols"] = headers.map((h, i) => ({ wch: Math.min(40, Math.max(String(h).length + 2, ...rows.map(x => String(x[i] == null ? "" : x[i]).length + 2), 12)) }));
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    };
+    add("Summary", ["Item","Value"], r.summary);
+    const order = [["amount_mismatch","Amount Mismatch"],["missing_in_2b","Missing in GSTR-2B"],["missing_in_books","Missing in Books"],["possible_match","Possible Matches"],["matched","Matched"]];
+    for (const [k, title] of order) add(title, r.tables[k].headers, r.tables[k].rows);
+    const data = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "gst_mismatch_report.xlsx";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    say("Report ready. Check your downloads.");
+  } catch (e) {
+    say("Could not create the file" + (e && e.message ? ": " + e.message : "."));
+  }
+});
+
+/* Open with the sample so the page shows what it does. */
+(function(){ const s = buildSample(); runWith(s.books, s.gst, true); })();
+</script>
+
+</body>
+</html>

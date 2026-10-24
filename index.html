@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Find the invoices that put your GST input tax credit at risk. Upload your purchase register and GSTR-2B and get a mismatch report in Excel.">
+<title>GST Mismatch Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one centered column. Hero opens with the claim and a real-looking mismatch report; then what it catches, how it works, why not a chatbot, privacy. */
+  :root {
+    --bg: #F4F6F9;
+    --surface: #FFFFFF;
+    --ink: #101C27;
+    --muted: #55677A;
+    --line: #DAE2EA;
+    --accent: #1A56C4;
+    --accent-ink: #FFFFFF;
+    --tint: #E9EFF8;
+    --good: #1E7B4F;
+    --bad: #B3322E;
+    --warn: #A86B0B;
+    --info: #4C63A8;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D141B; --surface: #151F29; --ink: #E6EDF4; --muted: #94A5B6; --line: #283645;
+      --accent: #6EA2FF; --accent-ink: #0A1220; --tint: #1B2938;
+      --good: #4CC38A; --bad: #F0706A; --warn: #E3B04B; --info: #8FA2DA; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0D141B; --surface: #151F29; --ink: #E6EDF4; --muted: #94A5B6; --line: #283645;
+    --accent: #6EA2FF; --accent-ink: #0A1220; --tint: #1B2938;
+    --good: #4CC38A; --bad: #F0706A; --warn: #E3B04B; --info: #8FA2DA; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); font-size: 16px; line-height: 1.55;
+    padding-block: 20px 48px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+  h1, h2, h3, p, ul { margin: 0; }
+  h1 { font-size: clamp(30px, 7.5vw, 46px); line-height: 1.08; font-weight: 600; letter-spacing: -0.025em; text-wrap: balance; }
+  h2 { font-size: clamp(22px, 5vw, 28px); line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+  h3 { font-size: 16px; font-weight: 600; }
+  .muted { color: var(--muted); }
+  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+  nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  .mark { width: 22px; height: 22px; border-radius: 5px; background: var(--accent); display: inline-grid; place-items: center; }
+  .mark svg { width: 14px; height: 14px; }
+
+  a.btn { display: inline-block; padding: 13px 20px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; text-align: center; }
+  a.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  a.btn.small { padding: 9px 14px; font-size: 14px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .hero { display: flex; flex-direction: column; gap: 20px; }
+  .hero p.sub { font-size: 18px; color: var(--muted); max-width: 54ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .cta-note { font-size: 14px; color: var(--muted); }
+
+  .report { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; }
+  .report-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--tint); }
+  .report-head .tag { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--warn); }
+  .report-head .risk { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+  .report-head .risk b { color: var(--bad); font-weight: 500; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 10px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  td.num, th.num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+  td.mono { font-family: var(--font-data); font-size: 13px; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+  .pill i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr; gap: 22px 28px; }
+  @media (min-width: 620px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+  .item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .item p { color: var(--muted); }
+  section { display: flex; flex-direction: column; gap: 22px; }
+
+  .steps { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .step { display: grid; grid-template-columns: 36px 1fr; gap: 14px; padding: 18px; border-bottom: 1px solid var(--line); }
+  .step:last-child { border-bottom: 0; }
+  .step .n { font-family: var(--font-data); color: var(--accent); font-weight: 500; }
+  .step p { color: var(--muted); margin-top: 2px; }
+  code { font-family: var(--font-data); font-size: 0.92em; background: var(--tint); padding: 1px 6px; border-radius: 4px; }
+
+  .vs { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .vs-row { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .vs-row:last-child { border-bottom: 0; }
+  @media (min-width: 620px) { .vs-row { grid-template-columns: 170px 1fr 1fr; gap: 18px; } }
+  .vs-row .what { font-weight: 600; }
+  .vs-row .them, .vs-row .us { color: var(--muted); font-size: 15px; }
+  .vs-row .us { color: var(--ink); }
+  .vs-row small { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 1px; }
+  @media (min-width: 620px) { .vs-row small { display: none; } .vs-head { display: grid; grid-template-columns: 170px 1fr 1fr; gap: 18px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--tint); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); } }
+  @media (max-width: 619px) { .vs-head { display: none; } }
+
+  .privacy { background: var(--tint); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .final { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+  footer { font-size: 13px; color: var(--muted); max-width: 64ch; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <span class="brand">
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5l3 3 6-7" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      GST Mismatch Checker
+    </span>
+    <a class="btn small" href="checker.html">Open the tool</a>
+  </nav>
+
+  <header class="hero">
+    <p class="eyebrow">For CAs and small businesses</p>
+    <h1>Find the invoices that put your GST credit at risk.</h1>
+    <p class="sub">Upload your purchase register and your GSTR-2B. Get a mismatch report in Excel in about two minutes, before you file GSTR-3B.</p>
+    <div class="cta-row">
+      <a class="btn" href="checker.html">Try it with sample data</a>
+      <span class="cta-note">No sign-up. Your files stay in your browser.</span>
+    </div>
+  </header>
+
+  <div class="report" role="figure" aria-label="Example mismatch report">
+    <div class="report-head">
+      <span class="tag">Sample report · 5 of 40 invoices</span>
+      <span class="risk">ITC at risk <b>₹81,720</b></span>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>GSTIN</th><th>Invoice</th><th class="num">Tax (books)</th><th class="num">Tax (GSTR-2B)</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">07CCCPC3456C1Z7</td><td class="mono">INV/0014</td><td class="num">13,320.00</td><td class="num">13,320.00</td><td><span class="pill"><i style="background:var(--good)"></i>Matched</span></td></tr>
+          <tr><td class="mono">19FFFPF6789F1Z1</td><td class="mono">INV/0021</td><td class="num">25,020.00</td><td class="num">25,920.00</td><td><span class="pill"><i style="background:var(--bad)"></i>Amount mismatch</span></td></tr>
+          <tr><td class="mono">29BBBPB2345B1Z6</td><td class="mono">INV/0004</td><td class="num">26,640.00</td><td class="num">—</td><td><span class="pill"><i style="background:var(--bad)"></i>Missing in GSTR-2B</span></td></tr>
+          <tr><td class="mono">27AAAPA1234A1Z5</td><td class="mono">INV/0010</td><td class="num">27,720.00</td><td class="num">—</td><td><span class="pill"><i style="background:var(--info)"></i>Possible match: INV/9010</span></td></tr>
+          <tr><td class="mono">29BBBPB2345B1Z6</td><td class="mono">INV/0008</td><td class="num">—</td><td class="num">31,860.00</td><td><span class="pill"><i style="background:var(--warn)"></i>Missing in books</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <section>
+    <h2>Four kinds of problems, sorted for you</h2>
+    <div class="grid2">
+      <div class="item"><h3>Amount mismatch</h3><p>The invoice is in both files, but the tax is different. You see the exact difference in rupees.</p></div>
+      <div class="item"><h3>Missing in GSTR-2B</h3><p>You recorded it, the portal doesn't show it. The supplier may not have filed yet, and the credit may not be claimable.</p></div>
+      <div class="item"><h3>Missing in books</h3><p>The portal shows an invoice you never recorded. Either an entry was missed or it isn't yours.</p></div>
+      <div class="item"><h3>Possible matches</h3><p>Same supplier, same amounts, slightly different invoice number. Usually a typo, and easy to fix once you see it.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><div><h3>Upload two files</h3><p>Your purchase register and your GSTR-2B, as Excel or CSV. Title rows, extra sheets and two-row headers are fine.</p></div></div>
+      <div class="step"><span class="n">2</span><div><h3>It matches invoice by invoice</h3><p>Supplier GSTIN plus invoice number. Spacing, capitals and leading zeros are ignored, so <code>inv-3</code> and <code>INV/0003</code> count as the same invoice.</p></div></div>
+      <div class="step"><span class="n">3</span><div><h3>Download the report</h3><p>One Excel file with a summary and a tab for each kind of problem, ready to send to a supplier or your CA.</p></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why not just ask a chatbot?</h2>
+    <div class="vs">
+      <div class="vs-head"><span></span><span>General chatbot</span><span>This tool</span></div>
+      <div class="vs-row"><span class="what">Volume</span><span class="them"><small>General chatbot</small>One file at a time, with long prompts.</span><span class="us"><small>This tool</small>Hundreds of invoices in one go.</span></div>
+      <div class="vs-row"><span class="what">Your formats</span><span class="them"><small>General chatbot</small>You describe the columns every time.</span><span class="us"><small>This tool</small>Reads GSTR-2B and common register layouts on its own.</span></div>
+      <div class="vs-row"><span class="what">The result</span><span class="them"><small>General chatbot</small>A chat reply you copy and tidy.</span><span class="us"><small>This tool</small>A finished Excel report with totals.</span></div>
+      <div class="vs-row"><span class="what">Your data</span><span class="them"><small>General chatbot</small>Pasted into a chat window.</span><span class="us"><small>This tool</small>Read in your browser, not uploaded.</span></div>
+    </div>
+  </section>
+
+  <section class="privacy">
+    <h2>Your invoices stay with you</h2>
+    <p>The matching runs inside your browser. Your files are not uploaded to a server and nothing is stored.</p>
+    <p class="muted">The tool flags differences for review. It is not tax advice, and a qualified CA should check results before any claim or filing.</p>
+  </section>
+
+  <section class="final">
+    <h2>Check your next filing before you file it.</h2>
+    <a class="btn" href="checker.html">Try it with sample data</a>
+  </section>
+
+  <footer>
+    Sample report figures and GSTINs on this page are made up. The tool currently matches on supplier GSTIN and invoice number, and does not yet treat credit notes or amended invoices separately.
+  </footer>
+</div>
+
+</body>
+</html>
